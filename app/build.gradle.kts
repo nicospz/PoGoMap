@@ -30,8 +30,8 @@ android {
         applicationId = "dev.nicospz.pogomap"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["MAPS_API_KEY"] =
             providers.gradleProperty("MAPS_API_KEY").orElse(
