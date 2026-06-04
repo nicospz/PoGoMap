@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dev.nicospz.pogomap.BuildConfig
 import dev.nicospz.pogomap.data.CampfireHttpException
 import dev.nicospz.pogomap.data.MapRepository
+import dev.nicospz.pogomap.data.MarkerTimeMode
 import dev.nicospz.pogomap.data.SavedCameraPosition
 import dev.nicospz.pogomap.data.TokenStore
 import dev.nicospz.pogomap.data.UserPreferences
@@ -44,6 +45,7 @@ data class MainUiState(
     val s2CellLevel: Int? = null,
     val s2CellCount: Int = 0,
     val doneRaidIds: Set<String> = emptySet(),
+    val markerTimeMode: MarkerTimeMode = MarkerTimeMode.Remaining,
 )
 
 class MainViewModel(
@@ -60,6 +62,7 @@ class MainViewModel(
             token = tokenStore.getToken(),
             uniqueRaidBossHints = userPreferences.loadUniqueRaidBossHints(),
             doneRaidIds = userPreferences.loadDoneRaidIds(),
+            markerTimeMode = userPreferences.loadMarkerTimeMode(),
         ),
     )
     val state: StateFlow<MainUiState> = _state.asStateFlow()
@@ -102,6 +105,15 @@ class MainViewModel(
 
     fun toggleSettings() {
         _state.update { it.copy(showSettings = !it.showSettings) }
+    }
+
+    fun setSettingsVisible(visible: Boolean) {
+        _state.update { it.copy(showSettings = visible) }
+    }
+
+    fun setMarkerTimeMode(mode: MarkerTimeMode) {
+        userPreferences.saveMarkerTimeMode(mode)
+        _state.update { it.copy(markerTimeMode = mode) }
     }
 
     fun dismissStatus() {

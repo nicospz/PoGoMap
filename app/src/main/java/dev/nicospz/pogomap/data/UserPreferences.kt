@@ -12,6 +12,11 @@ data class SavedCameraPosition(
     val zoom: Float,
 )
 
+enum class MarkerTimeMode {
+    Remaining,
+    RealTime,
+}
+
 class UserPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("pogo_user_preferences", Context.MODE_PRIVATE)
 
@@ -89,6 +94,17 @@ class UserPreferences(context: Context) {
             .apply()
     }
 
+    fun loadMarkerTimeMode(): MarkerTimeMode {
+        val name = prefs.getString(KEY_MARKER_TIME_MODE, null) ?: return MarkerTimeMode.Remaining
+        return MarkerTimeMode.entries.firstOrNull { it.name == name } ?: MarkerTimeMode.Remaining
+    }
+
+    fun saveMarkerTimeMode(mode: MarkerTimeMode) {
+        prefs.edit()
+            .putString(KEY_MARKER_TIME_MODE, mode.name)
+            .apply()
+    }
+
     companion object {
         private const val KEY_UI_FILTERS = "ui_filters"
         private const val KEY_RAID_TYPES = "raid_types"
@@ -101,6 +117,7 @@ class UserPreferences(context: Context) {
         private const val KEY_SHADOW_TIER_5_BOSS = "shadow_tier_5_boss"
         private const val KEY_MEGA_BOSS = "mega_boss"
         private const val KEY_DONE_RAID_IDS = "done_raid_ids"
+        private const val KEY_MARKER_TIME_MODE = "marker_time_mode"
     }
 }
 

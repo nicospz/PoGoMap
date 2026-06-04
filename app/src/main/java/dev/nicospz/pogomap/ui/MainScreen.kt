@@ -3,6 +3,7 @@ package dev.nicospz.pogomap.ui
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -14,6 +15,7 @@ import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import android.location.Location
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -98,6 +100,7 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.gms.maps.model.PolylineOptions
 import dev.nicospz.pogomap.R
+import dev.nicospz.pogomap.data.MarkerTimeMode
 import dev.nicospz.pogomap.data.SavedCameraPosition
 import dev.nicospz.pogomap.domain.AdvancedFilterState
 import dev.nicospz.pogomap.domain.MapFilter
@@ -108,6 +111,7 @@ import dev.nicospz.pogomap.domain.UiFilter
 import dev.nicospz.pogomap.domain.ViewportBounds
 import dev.nicospz.pogomap.domain.isEggRaid
 import java.io.IOException
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -121,7 +125,6 @@ fun MainScreen(viewModel: MainViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var showFilters by remember { mutableStateOf(false) }
-    var showDataDebug by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.statusMessage) {
         val message = state.statusMessage ?: return@LaunchedEffect
@@ -139,6 +142,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 PogoGoogleMap(
                     markers = state.markers,
                     doneRaidIds = state.doneRaidIds,
+                    markerTimeMode = state.markerTimeMode,
                     initialCameraPosition = state.savedCameraPosition,
                     onCameraIdle = viewModel::onCameraIdle,
                     onForegrounded = viewModel::onForegrounded,
@@ -148,6 +152,7 @@ fun MainScreen(viewModel: MainViewModel) {
                 TopControls(
                     state = state,
                     onToggleFilter = viewModel::toggleFilter,
+                    onOpenSettings = { viewModel.setSettingsVisible(true) },
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .fillMaxWidth(),
@@ -159,14 +164,6 @@ fun MainScreen(viewModel: MainViewModel) {
                             .padding(top = 116.dp),
                     )
                 }
-                DataDebugButton(
-                    objectCount = state.visibleObjects.size,
-                    markerCount = state.markers.size,
-                    onClick = { showDataDebug = true },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 76.dp, end = 16.dp),
-                )
                 if (state.filters == setOf(UiFilter.Raids)) {
                     RaidFilterButton(
                         activeCount = state.advancedFilters.activeCount,
@@ -177,13 +174,12 @@ fun MainScreen(viewModel: MainViewModel) {
                     )
                 }
                 if (state.showSettings) {
-                    SettingsPanel(
-                        initialToken = state.token,
-                        onSave = viewModel::saveToken,
-                        onClear = viewModel::clearToken,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(18.dp),
+                    SettingsSheet(
+                        state = state,
+                        onTimeModeSelected = viewModel::setMarkerTimeMode,
+                        onSaveToken = viewModel::saveToken,
+                        onClearToken = viewModel::clearToken,
+                        onDismiss = { viewModel.setSettingsVisible(false) },
                     )
                 }
                 if (state.isLoading) {
@@ -218,12 +214,6 @@ fun MainScreen(viewModel: MainViewModel) {
                             showFilters = false
                         },
                         onReset = viewModel::resetFilters,
-                    )
-                }
-                if (showDataDebug) {
-                    DataDebugSheet(
-                        state = state,
-                        onDismiss = { showDataDebug = false },
                     )
                 }
             }
@@ -284,6 +274,7 @@ private fun MapStatusPill(
 private fun TopControls(
     state: MainUiState,
     onToggleFilter: (UiFilter) -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -301,6 +292,13 @@ private fun TopControls(
                     category = category,
                     selected = state.filters == setOf(category.filter),
                     onClick = { onToggleFilter(category.filter) },
+                )
+            }
+            item {
+                SettingsTabButton(
+                    objectCount = state.visibleObjects.size,
+                    markerCount = state.markers.size,
+                    onClick = onOpenSettings,
                 )
             }
         }
@@ -415,7 +413,7 @@ private fun RaidFilterButton(
 }
 
 @Composable
-private fun DataDebugButton(
+private fun SettingsTabButton(
     objectCount: Int,
     markerCount: Int,
     onClick: () -> Unit,
@@ -432,7 +430,8 @@ private fun DataDebugButton(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Data", color = PogoText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Icon(imageVector = SettingsIcon, contentDescription = null, tint = PogoText, modifier = Modifier.size(18.dp))
+            Text("Settings", color = PogoText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Surface(shape = PogoBadgeShape, color = PogoText) {
                 Text(
                     text = "$objectCount/$markerCount",
@@ -580,11 +579,15 @@ private fun FilterSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DataDebugSheet(
+private fun SettingsSheet(
     state: MainUiState,
+    onTimeModeSelected: (MarkerTimeMode) -> Unit,
+    onSaveToken: (String) -> Unit,
+    onClearToken: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var token by remember(state.token) { mutableStateOf(state.token) }
     val typeCounts = remember(state.visibleObjects) {
         state.visibleObjects
             .groupingBy { it.mapObjectType ?: "UNKNOWN" }
@@ -619,7 +622,7 @@ private fun DataDebugSheet(
                 ) {
                     Column {
                         Text(
-                            "Loaded Data",
+                            "Settings",
                             color = PogoText,
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.SemiBold,
@@ -642,6 +645,54 @@ private fun DataDebugSheet(
                             color = Color(0xFF687278),
                             style = MaterialTheme.typography.titleLarge,
                         )
+                    }
+                }
+            }
+            item {
+                DebugSection(title = "Time Labels") {
+                    Text(
+                        text = "Raid marker labels",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        FilterChip(
+                            selected = state.markerTimeMode == MarkerTimeMode.Remaining,
+                            onClick = { onTimeModeSelected(MarkerTimeMode.Remaining) },
+                            label = { Text("Remaining time") },
+                        )
+                        FilterChip(
+                            selected = state.markerTimeMode == MarkerTimeMode.RealTime,
+                            onClick = { onTimeModeSelected(MarkerTimeMode.RealTime) },
+                            label = { Text("Real time") },
+                        )
+                    }
+                }
+            }
+            item {
+                DebugSection(title = "Bearer Token") {
+                    OutlinedTextField(
+                        value = token,
+                        onValueChange = { token = it },
+                        minLines = 4,
+                        maxLines = 7,
+                        label = { Text("Paste token manually") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    ) {
+                        OutlinedButton(onClick = onClearToken) {
+                            Text("Clear")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = { onSaveToken(token) }, enabled = token.isNotBlank()) {
+                            Text("Save")
+                        }
                     }
                 }
             }
@@ -859,48 +910,10 @@ private fun AdvancedFilterState.togglePokemon(name: String): AdvancedFilterState
 }
 
 @Composable
-private fun SettingsPanel(
-    initialToken: String,
-    onSave: (String) -> Unit,
-    onClear: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var token by remember(initialToken) { mutableStateOf(initialToken) }
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        tonalElevation = 6.dp,
-        shadowElevation = 6.dp,
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text("Bearer Token", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = token,
-                onValueChange = { token = it },
-                minLines = 4,
-                maxLines = 7,
-                label = { Text("Paste token manually") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = onClear) {
-                    Text("Clear token")
-                }
-                Spacer(Modifier.width(8.dp))
-                Button(onClick = { onSave(token) }, enabled = token.isNotBlank()) {
-                    Text("Save")
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun PogoGoogleMap(
     markers: List<MarkerItem>,
     doneRaidIds: Set<String>,
+    markerTimeMode: MarkerTimeMode,
     initialCameraPosition: SavedCameraPosition?,
     onCameraIdle: (ViewportBounds, Double, Double, Float) -> Unit,
     onForegrounded: () -> Unit,
@@ -1018,7 +1031,7 @@ private fun PogoGoogleMap(
         }
     }
 
-    LaunchedEffect(googleMap, markers, doneRaidIds) {
+    LaunchedEffect(googleMap, markers, doneRaidIds, markerTimeMode) {
         val map = googleMap ?: return@LaunchedEffect
         val renderedMarkers = markers.distributed(limit = MAX_RENDERED_MAP_MARKERS)
         map.clear()
@@ -1029,7 +1042,7 @@ private fun PogoGoogleMap(
                     .position(latLng)
                     .title(item.title)
                     .snippet(item.snippet)
-                    .icon(item.markerIcon(context))
+                    .icon(item.markerIcon(context, markerTimeMode))
                     .alpha(if (item.isDoneRaid(doneRaidIds)) 0.35f else 1f)
                     .anchor(0.5f, item.markerAnchorY),
             )
@@ -1122,6 +1135,7 @@ private fun MarkerDetailsSheet(
     onToggleDone: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 28.dp)) {
             Text(marker.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -1138,6 +1152,18 @@ private fun MarkerDetailsSheet(
                     DetailRow("Hatch", raid.hatchAt.display())
                     DetailRow("End", raid.endsAt.display())
                     Spacer(Modifier.height(16.dp))
+                    OutlinedButton(
+                        onClick = { context.openGoogleMapsDirections(marker.coordinate.latitude, marker.coordinate.longitude) },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(26.dp),
+                    ) {
+                        Text(
+                            text = "Directions",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
                     Button(
                         onClick = onToggleDone,
                         modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -1173,6 +1199,12 @@ private fun DetailRow(label: String, value: String) {
         Text(label, modifier = Modifier.width(92.dp), color = Color.DarkGray)
         Text(value, modifier = Modifier.weight(1f))
     }
+}
+
+private fun Context.openGoogleMapsDirections(latitude: Double, longitude: Double) {
+    val uri = Uri.parse("https://www.google.com/maps/dir/?api=1&destination=$latitude,$longitude")
+    val intent = Intent(Intent.ACTION_VIEW, uri)
+    startActivity(intent)
 }
 
 private enum class PogoCategory(
@@ -1255,7 +1287,7 @@ private fun MarkerItem.isDoneRaid(doneRaidIds: Set<String>): Boolean {
         objectId in doneRaidIds
 }
 
-private suspend fun MarkerItem.markerIcon(context: Context) = when {
+private suspend fun MarkerItem.markerIcon(context: Context, markerTimeMode: MarkerTimeMode) = when {
     category == UiFilter.Pokestops -> BitmapDescriptorFactory.fromBitmap(
         createVectorMarkerBitmap(context, R.drawable.pgo_pokestop, 34),
     )
@@ -1271,8 +1303,8 @@ private suspend fun MarkerItem.markerIcon(context: Context) = when {
     category == UiFilter.DMax -> BitmapDescriptorFactory.fromBitmap(
         createVectorMarkerBitmap(context, R.drawable.pgo_dmax, 34),
     )
-    raidLabel() != null -> {
-        val label = raidLabel().orEmpty()
+    raidLabel(markerTimeMode) != null -> {
+        val label = raidLabel(markerTimeMode).orEmpty()
         val isEgg = source.pgoGym?.raid.isEggRaid()
         val raidImage = raidImageUrl()?.let { RaidImageCache.load(it) }
         BitmapDescriptorFactory.fromBitmap(createRaidMarkerBitmap(context, label, hue, raidImage, isEgg))
@@ -1286,7 +1318,7 @@ private fun MarkerItem.raidImageUrl(): String? {
     return if (raid.isEggRaid()) raid.eggImageUrl?.takeUnless { it.isBlank() } else raid.bossImageUrl?.takeUnless { it.isBlank() }
 }
 
-private fun MarkerItem.raidLabel(): String? {
+private fun MarkerItem.raidLabel(markerTimeMode: MarkerTimeMode = MarkerTimeMode.RealTime): String? {
     if (category != UiFilter.Raids && category != UiFilter.EventRaids) return null
     val raid = source.pgoGym?.raid ?: return null
     val isEgg = raid.isEggRaid()
@@ -1295,9 +1327,9 @@ private fun MarkerItem.raidLabel(): String? {
     val boss = bossName ?: if (isEgg) "Egg" else "Raid"
     val now = Instant.now()
     val status = when {
-        isEgg && raid.hatchAt != null && raid.hatchAt.isAfter(now) -> "Hatches ${raid.hatchAt.formatMarkerTime()}"
-        raid.startsAt != null && raid.startsAt.isAfter(now) -> "Starts ${raid.startsAt.formatMarkerTime()}"
-        raid.endsAt != null -> "Ends ${raid.endsAt.formatMarkerTime()}"
+        isEgg && raid.hatchAt != null && raid.hatchAt.isAfter(now) -> raid.hatchAt.formatMarkerStatus("Hatches", now, markerTimeMode)
+        raid.startsAt != null && raid.startsAt.isAfter(now) -> raid.startsAt.formatMarkerStatus("Starts", now, markerTimeMode)
+        raid.endsAt != null -> raid.endsAt.formatMarkerStatus("Ends", now, markerTimeMode)
         else -> null
     }
     return if (status == null) boss else "$boss\n$status"
@@ -1603,8 +1635,89 @@ private val RefreshIcon: ImageVector
 
 private var _refreshIcon: ImageVector? = null
 
+private val SettingsIcon: ImageVector
+    get() {
+        if (_settingsIcon != null) return _settingsIcon!!
+        _settingsIcon = ImageVector.Builder(
+            name = "Settings",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f,
+        ).apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color(0xFF44686C)),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(12f, 15f)
+                arcToRelative(3f, 3f, 0f, true, false, 0f, -6f)
+                arcToRelative(3f, 3f, 0f, true, false, 0f, 6f)
+                moveTo(19.4f, 15f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 20f, 13.5f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 18.9f, 12f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 20f, 10.5f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 19.4f, 9f)
+                lineTo(17.7f, 8f)
+                arcTo(7.4f, 7.4f, 0f, false, false, 16.7f, 6.3f)
+                lineTo(16.7f, 4.3f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 15.1f, 3f)
+                horizontalLineTo(12.9f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 11.3f, 4.3f)
+                lineTo(11.3f, 6.3f)
+                arcTo(7.4f, 7.4f, 0f, false, false, 9.3f, 7.5f)
+                lineTo(7.6f, 6.5f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 5.6f, 6.8f)
+                lineTo(4.5f, 8.7f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 4.9f, 10.8f)
+                lineTo(6.6f, 11.8f)
+                arcTo(7.4f, 7.4f, 0f, false, false, 6.6f, 14.2f)
+                lineTo(4.9f, 15.2f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 4.5f, 17.3f)
+                lineTo(5.6f, 19.2f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 7.6f, 19.5f)
+                lineTo(9.3f, 18.5f)
+                arcTo(7.4f, 7.4f, 0f, false, false, 11.3f, 19.7f)
+                lineTo(11.3f, 21.7f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 12.9f, 23f)
+                horizontalLineTo(15.1f)
+                arcTo(1.65f, 1.65f, 0f, false, false, 16.7f, 21.7f)
+                lineTo(16.7f, 19.7f)
+                arcTo(7.4f, 7.4f, 0f, false, false, 18.7f, 18.5f)
+                lineTo(20.4f, 19.5f)
+            }
+        }.build()
+        return _settingsIcon!!
+    }
+
+private var _settingsIcon: ImageVector? = null
+
+private fun Instant.formatMarkerStatus(
+    action: String,
+    now: Instant,
+    mode: MarkerTimeMode,
+): String {
+    return when (mode) {
+        MarkerTimeMode.Remaining -> "$action in ${remainingMarkerTime(now)}"
+        MarkerTimeMode.RealTime -> "$action at ${formatMarkerTime()}"
+    }
+}
+
 private fun Instant.formatMarkerTime(): String {
     return markerTimeFormatter.withZone(ZoneId.systemDefault()).format(this)
+}
+
+private fun Instant.remainingMarkerTime(now: Instant): String {
+    val totalMinutes = maxOf(0L, Duration.between(now, this).toMinutes())
+    val hours = totalMinutes / 60
+    val minutes = totalMinutes % 60
+    return when {
+        hours > 0 && minutes > 0 -> "${hours}h ${minutes}m"
+        hours > 0 -> "${hours}h"
+        else -> "${minutes}m"
+    }
 }
 
 private fun Instant?.display(): String =
