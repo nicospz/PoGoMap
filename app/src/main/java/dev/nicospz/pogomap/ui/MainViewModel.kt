@@ -138,10 +138,16 @@ class MainViewModel(
         retryLastViewport()
     }
 
-    fun applyAdvancedFilters(filters: AdvancedFilterState) {
+    fun applyAdvancedFilters(filters: AdvancedFilterState, targetFilter: UiFilter? = null) {
         userPreferences.saveAdvancedFilters(filters)
         _state.update { current ->
-            val nextUiFilters = if (filters.activeCount > 0) setOf(UiFilter.Raids) else current.filters
+            val nextUiFilters = when {
+                targetFilter == UiFilter.Raids && filters.raidActiveCount > 0 -> setOf(UiFilter.Raids)
+                targetFilter in setOf(UiFilter.DMax, UiFilter.GMax) && filters.maxActiveCount > 0 -> setOf(targetFilter!!)
+                targetFilter == null && filters.raidActiveCount > 0 -> setOf(UiFilter.Raids)
+                targetFilter == null && filters.maxActiveCount > 0 -> setOf(UiFilter.DMax)
+                else -> current.filters
+            }
             if (nextUiFilters != current.filters) {
                 userPreferences.saveUiFilters(nextUiFilters)
             }

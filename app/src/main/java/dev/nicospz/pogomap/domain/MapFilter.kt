@@ -73,6 +73,13 @@ object MapFilter {
         }.toSet()
     }
 
+    fun maxPokemon(objects: Collection<PogoMapObject>): List<String> {
+        return objects.mapNotNull { obj ->
+            val battle = obj.pgoPowerspot?.overrideMaxBattle ?: obj.pgoPowerspot?.maxBattle
+            battle?.bossName?.trim()?.takeUnless { it.isBlank() }
+        }.distinct().sorted()
+    }
+
     fun raidDisplayName(raid: RaidInfo?): String {
         if (raid.isEggRaid()) return "Egg"
         val bossName = raid?.bossName?.trim().orEmpty()
@@ -132,14 +139,16 @@ object MapFilter {
             (obj.pgoPowerspot?.maxBattle != null || obj.pgoPowerspot?.overrideMaxBattle != null)
         ) {
             val battle = obj.pgoPowerspot?.overrideMaxBattle ?: obj.pgoPowerspot?.maxBattle
-            markers += MarkerItem(
-                objectId = obj.id,
-                coordinate = coordinate,
-                category = UiFilter.DMax,
-                title = battle?.bossName?.takeUnless { it.isBlank() } ?: "Max Battle",
-                snippet = battle?.rating?.let { "Rating $it" } ?: "Power Spot",
-                source = obj,
-            )
+            if (maxBattleMatches(battle, advancedFilters)) {
+                markers += MarkerItem(
+                    objectId = obj.id,
+                    coordinate = coordinate,
+                    category = UiFilter.DMax,
+                    title = battle?.bossName?.takeUnless { it.isBlank() } ?: "Max Battle",
+                    snippet = battle?.rating?.let { "Rating $it" } ?: "Power Spot",
+                    source = obj,
+                )
+            }
         }
         if (UiFilter.Routes in filters && obj.mapObjectType == BackendDropType.PgoRoute.wireName) {
             markers += MarkerItem(obj.id, coordinate, UiFilter.Routes, "Route", routeSnippet(obj), obj)
@@ -193,6 +202,16 @@ object MapFilter {
         } else {
             bossName in advancedFilters.raidPokemon
         }
+    }
+
+    private fun maxBattleMatches(
+        battle: MaxBattleInfo?,
+        advancedFilters: AdvancedFilterState,
+    ): Boolean {
+        if (battle == null) return false
+        if (advancedFilters.maxPokemon.isEmpty()) return true
+        val bossName = battle.bossName?.trim().orEmpty()
+        return bossName in advancedFilters.maxPokemon
     }
 }
 

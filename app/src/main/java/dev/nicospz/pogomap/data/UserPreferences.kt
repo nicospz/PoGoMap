@@ -40,6 +40,7 @@ class UserPreferences(context: Context) {
                 .mapNotNull { it.toIntOrNull() }
                 .toSet(),
             raidPokemon = prefs.getStringSet(KEY_RAID_POKEMON, emptySet()).orEmpty(),
+            maxPokemon = prefs.getStringSet(KEY_MAX_POKEMON, emptySet()).orEmpty(),
         )
     }
 
@@ -48,6 +49,7 @@ class UserPreferences(context: Context) {
             .putStringSet(KEY_RAID_TYPES, filters.raidTypes.map { it.name }.toSet())
             .putStringSet(KEY_RAID_TIERS, filters.raidTiers.map { it.toString() }.toSet())
             .putStringSet(KEY_RAID_POKEMON, filters.raidPokemon)
+            .putStringSet(KEY_MAX_POKEMON, filters.maxPokemon)
             .apply()
     }
 
@@ -110,6 +112,7 @@ class UserPreferences(context: Context) {
         private const val KEY_RAID_TYPES = "raid_types"
         private const val KEY_RAID_TIERS = "raid_tiers"
         private const val KEY_RAID_POKEMON = "raid_pokemon"
+        private const val KEY_MAX_POKEMON = "max_pokemon"
         private const val KEY_CAMERA_LAT = "camera_lat"
         private const val KEY_CAMERA_LNG = "camera_lng"
         private const val KEY_CAMERA_ZOOM = "camera_zoom"

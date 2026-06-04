@@ -33,9 +33,16 @@ data class AdvancedFilterState(
     val raidTiers: Set<Int> = emptySet(),
     val raidPokemon: Set<String> = emptySet(),
     val raidPokemonTiers: Set<Int> = emptySet(),
+    val maxPokemon: Set<String> = emptySet(),
 ) {
-    val activeCount: Int
+    val raidActiveCount: Int
         get() = raidTypes.size + raidTiers.size + raidPokemon.size
+
+    val maxActiveCount: Int
+        get() = maxPokemon.size
+
+    val activeCount: Int
+        get() = raidActiveCount + maxActiveCount
 }
 
 data class LatLngPoint(

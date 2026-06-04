@@ -164,9 +164,10 @@ fun MainScreen(viewModel: MainViewModel) {
                             .padding(top = 116.dp),
                     )
                 }
-                if (state.filters == setOf(UiFilter.Raids)) {
+                val filterSheetMode = state.filterSheetMode
+                if (filterSheetMode != null) {
                     RaidFilterButton(
-                        activeCount = state.advancedFilters.activeCount,
+                        activeCount = filterSheetMode.activeCount(state.advancedFilters),
                         onClick = { showFilters = true },
                         modifier = Modifier
                             .align(Alignment.BottomStart)
@@ -206,15 +207,18 @@ fun MainScreen(viewModel: MainViewModel) {
                     )
                 }
                 if (showFilters) {
-                    FilterSheet(
-                        state = state,
-                        onDismiss = { showFilters = false },
-                        onApply = {
-                            viewModel.applyAdvancedFilters(it)
-                            showFilters = false
-                        },
-                        onReset = viewModel::resetFilters,
-                    )
+                    filterSheetMode?.let { mode ->
+                        FilterSheet(
+                            state = state,
+                            mode = mode,
+                            onDismiss = { showFilters = false },
+                            onApply = {
+                                viewModel.applyAdvancedFilters(it, mode.targetFilter)
+                                showFilters = false
+                            },
+                            onReset = viewModel::resetFilters,
+                        )
+                    }
                 }
             }
         }
@@ -448,6 +452,7 @@ private fun SettingsTabButton(
 @Composable
 private fun FilterSheet(
     state: MainUiState,
+    mode: FilterSheetMode,
     onDismiss: () -> Unit,
     onApply: (AdvancedFilterState) -> Unit,
     onReset: () -> Unit,
@@ -456,6 +461,7 @@ private fun FilterSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val tiers = remember(state.visibleObjects) { MapFilter.raidTiers(state.visibleObjects) }
     val pokemon = remember(state.visibleObjects) { raidPokemonOptions(state.visibleObjects) }
+    val maxPokemon = remember(state.visibleObjects) { MapFilter.maxPokemon(state.visibleObjects) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -476,7 +482,7 @@ private fun FilterSheet(
                 ) {
                     Text("RESET", color = Color(0xFF22C7A7), fontWeight = FontWeight.Bold)
                 }
-                Text("Raids", color = PogoText, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(mode.title, color = PogoText, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Surface(
                     modifier = Modifier.clickable(onClick = onDismiss),
                     shape = RoundedCornerShape(24.dp),
@@ -496,66 +502,87 @@ private fun FilterSheet(
                 contentPadding = PaddingValues(start = 20.dp, top = 22.dp, end = 20.dp, bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(26.dp),
             ) {
-                item {
-                    FilterSection(title = "Raid Type") {
-                        FilterChip(
-                            selected = RaidTypeFilter.ActiveRaids in draft.raidTypes,
-                            onClick = { draft = draft.toggleRaidType(RaidTypeFilter.ActiveRaids) },
-                            label = { Text("Active Raids") },
-                        )
-                        FilterChip(
-                            selected = RaidTypeFilter.Eggs in draft.raidTypes,
-                            onClick = { draft = draft.toggleRaidType(RaidTypeFilter.Eggs) },
-                            label = { Text("Eggs") },
-                        )
-                    }
-                }
-                item {
-                    FilterSection(title = "Tier") {
-                        tiers.ifEmpty { listOf(1, 3, 4, 5, 6) }.forEach { tier ->
+                if (mode == FilterSheetMode.Raids) {
+                    item {
+                        FilterSection(title = "Raid Type") {
                             FilterChip(
-                                selected = tier in draft.raidTiers,
-                                onClick = { draft = draft.toggleTier(tier) },
-                                label = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
-                                        Text(tier.toString())
-                                        Text("R", fontWeight = FontWeight.Black)
-                                    }
-                                },
+                                selected = RaidTypeFilter.ActiveRaids in draft.raidTypes,
+                                onClick = { draft = draft.toggleRaidType(RaidTypeFilter.ActiveRaids) },
+                                label = { Text("Active Raids") },
+                            )
+                            FilterChip(
+                                selected = RaidTypeFilter.Eggs in draft.raidTypes,
+                                onClick = { draft = draft.toggleRaidType(RaidTypeFilter.Eggs) },
+                                label = { Text("Eggs") },
                             )
                         }
                     }
-                }
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(
-                            "Pokemon",
-                            color = PogoText,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        if (pokemon.isEmpty()) {
+                    item {
+                        FilterSection(title = "Tier") {
+                            tiers.ifEmpty { listOf(1, 3, 4, 5, 6) }.forEach { tier ->
+                                FilterChip(
+                                    selected = tier in draft.raidTiers,
+                                    onClick = { draft = draft.toggleTier(tier) },
+                                    label = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Text(tier.toString())
+                                            Text("R", fontWeight = FontWeight.Black)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(
-                                text = "Move the map or enable Raids to populate Pokémon filters.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                "Pokemon",
+                                color = PogoText,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold,
                             )
-                        } else {
-                            val rows = (pokemon.size + 2) / 3
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(3),
-                                modifier = Modifier.height((rows * 136).dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
-                                userScrollEnabled = false,
-                            ) {
-                                items(pokemon) { option ->
-                                    PokemonFilterTile(
-                                        option = option,
-                                        selected = option.name in draft.raidPokemon,
-                                        onClick = { draft = draft.togglePokemon(option.name) },
+                            if (pokemon.isEmpty()) {
+                                Text(
+                                    text = "Move the map or enable Raids to populate Pokemon filters.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                val rows = (pokemon.size + 2) / 3
+                                LazyVerticalGrid(
+                                    columns = GridCells.Fixed(3),
+                                    modifier = Modifier.height((rows * 136).dp),
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                                    userScrollEnabled = false,
+                                ) {
+                                    items(pokemon) { option ->
+                                        PokemonFilterTile(
+                                            option = option,
+                                            selected = option.name in draft.raidPokemon,
+                                            onClick = { draft = draft.togglePokemon(option.name) },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    item {
+                        FilterSection(title = "Pokemon") {
+                            if (maxPokemon.isEmpty()) {
+                                Text(
+                                    text = "Move the map or enable Max battles to populate Pokemon filters.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                maxPokemon.forEach { name ->
+                                    FilterChip(
+                                        selected = name in draft.maxPokemon,
+                                        onClick = { draft = draft.toggleMaxPokemon(name) },
+                                        label = { Text(name) },
                                     )
                                 }
                             }
@@ -570,7 +597,7 @@ private fun FilterSheet(
                     shape = RoundedCornerShape(30.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = PogoMint, contentColor = Color.White),
                 ) {
-                    Text("Apply Filters (${draft.activeCount})", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Apply Filters (${mode.activeCount(draft)})", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -893,6 +920,7 @@ private fun selectedFilterLabels(state: MainUiState): List<String> {
         if (RaidTypeFilter.Eggs in state.advancedFilters.raidTypes) add("Eggs")
         state.advancedFilters.raidTiers.sorted().forEach { add("Tier $it") }
         addAll(state.advancedFilters.raidPokemon.sorted())
+        state.advancedFilters.maxPokemon.sorted().forEach { add("Max $it") }
     }
     return (categoryLabels + detailLabels).take(10)
 }
@@ -907,6 +935,32 @@ private fun AdvancedFilterState.toggleTier(tier: Int): AdvancedFilterState {
 
 private fun AdvancedFilterState.togglePokemon(name: String): AdvancedFilterState {
     return copy(raidPokemon = if (name in raidPokemon) raidPokemon - name else raidPokemon + name)
+}
+
+private fun AdvancedFilterState.toggleMaxPokemon(name: String): AdvancedFilterState {
+    return copy(maxPokemon = if (name in maxPokemon) maxPokemon - name else maxPokemon + name)
+}
+
+private val MainUiState.filterSheetMode: FilterSheetMode?
+    get() = when (filters.singleOrNull()) {
+        UiFilter.Raids -> FilterSheetMode.Raids
+        UiFilter.DMax -> FilterSheetMode.DMax
+        UiFilter.GMax -> FilterSheetMode.GMax
+        else -> null
+    }
+
+private enum class FilterSheetMode(
+    val title: String,
+    val targetFilter: UiFilter,
+) {
+    Raids("Raids", UiFilter.Raids),
+    DMax("D-Max", UiFilter.DMax),
+    GMax("G-Max", UiFilter.GMax);
+
+    fun activeCount(filters: AdvancedFilterState): Int = when (this) {
+        Raids -> filters.raidActiveCount
+        DMax, GMax -> filters.maxActiveCount
+    }
 }
 
 @Composable

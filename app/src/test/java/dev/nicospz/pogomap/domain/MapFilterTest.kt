@@ -128,20 +128,30 @@ class MapFilterTest {
 
     @Test
     fun `powerspot with max battle appears under dmax gmax`() {
-        val powerSpot = PogoMapObject(
-            id = "spot-1",
-            mapObjectType = "PGO_POWERSPOT",
-            pgoPowerspot = PowerspotInfo(
-                location = LatLngPoint(35.0, 139.0),
-                maxBattle = MaxBattleInfo("Charmander", 3),
-                overrideMaxBattle = null,
-            ),
-        )
+        val powerSpot = powerspot("spot-1", "Charmander")
 
         val marker = MapFilter.markerItems(listOf(powerSpot), setOf(UiFilter.DMax))
 
         assertEquals(1, marker.size)
         assertEquals(UiFilter.DMax, marker.single().category)
+    }
+
+    @Test
+    fun `max pokemon filter keeps matching powerspots`() {
+        val objects = listOf(
+            powerspot("spot-1", "Charmander"),
+            powerspot("spot-2", "Bulbasaur"),
+        )
+
+        val markers = MapFilter.markerItems(
+            objects = objects,
+            filters = setOf(UiFilter.DMax),
+            advancedFilters = AdvancedFilterState(maxPokemon = setOf("Bulbasaur")),
+        )
+
+        assertEquals(1, markers.size)
+        assertEquals("spot-2", markers.single().objectId)
+        assertEquals(listOf("Bulbasaur", "Charmander"), MapFilter.maxPokemon(objects))
     }
 
     @Test
@@ -270,6 +280,16 @@ class MapFilterTest {
             location = LatLngPoint(35.0, 139.0),
             team = "MYSTIC",
             raid = raid,
+        ),
+    )
+
+    private fun powerspot(id: String, bossName: String): PogoMapObject = PogoMapObject(
+        id = id,
+        mapObjectType = "PGO_POWERSPOT",
+        pgoPowerspot = PowerspotInfo(
+            location = LatLngPoint(35.0, 139.0),
+            maxBattle = MaxBattleInfo(bossName, 3),
+            overrideMaxBattle = null,
         ),
     )
 }
