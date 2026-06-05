@@ -115,6 +115,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.cos
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -979,6 +980,7 @@ private fun PogoGoogleMap(
         MapView(context).apply { onCreate(Bundle()) }
     }
     var googleMap by remember { mutableStateOf<GoogleMap?>(null) }
+    var cameraCenter by remember { mutableStateOf<LatLng?>(null) }
     var hasLocationPermission by remember { mutableStateOf(context.hasLocationPermission()) }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
@@ -1017,6 +1019,7 @@ private fun PogoGoogleMap(
                     map.setOnCameraIdleListener {
                         val bounds = map.projection.visibleRegion.latLngBounds
                         val center = map.cameraPosition.target
+                        cameraCenter = center
                         onCameraIdle(
                             ViewportBounds(
                                 south = bounds.southwest.latitude,
@@ -1085,9 +1088,12 @@ private fun PogoGoogleMap(
         }
     }
 
-    LaunchedEffect(googleMap, markers, doneRaidIds, markerTimeMode) {
+    LaunchedEffect(googleMap, markers, doneRaidIds, markerTimeMode, cameraCenter) {
         val map = googleMap ?: return@LaunchedEffect
-        val renderedMarkers = markers.distributed(limit = MAX_RENDERED_MAP_MARKERS)
+        val renderedMarkers = markers.nearestTo(
+            center = cameraCenter ?: map.cameraPosition.target,
+            limit = MAX_RENDERED_MAP_MARKERS,
+        )
         map.clear()
         renderedMarkers.forEach { item ->
             val latLng = LatLng(item.coordinate.latitude, item.coordinate.longitude)
@@ -1115,10 +1121,20 @@ private fun PogoGoogleMap(
     }
 }
 
-private fun List<MarkerItem>.distributed(limit: Int): List<MarkerItem> {
+private fun List<MarkerItem>.nearestTo(center: LatLng, limit: Int): List<MarkerItem> {
     if (size <= limit) return this
-    val step = (size - 1).toDouble() / (limit - 1).toDouble()
-    return List(limit) { index -> this[(index * step).toInt()] }.distinctBy { it.objectId to it.category }
+    return sortedWith(
+        compareBy<MarkerItem> { it.distanceScoreFrom(center) }
+            .thenBy { it.category.ordinal }
+            .thenBy { it.objectId },
+    ).take(limit)
+}
+
+private fun MarkerItem.distanceScoreFrom(center: LatLng): Double {
+    val latDelta = coordinate.latitude - center.latitude
+    val lngScale = cos(Math.toRadians(center.latitude)).coerceAtLeast(0.01)
+    val lngDelta = (coordinate.longitude - center.longitude) * lngScale
+    return latDelta * latDelta + lngDelta * lngDelta
 }
 
 private const val MAX_RENDERED_MAP_MARKERS = 96
